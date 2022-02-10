@@ -1,0 +1,65 @@
+#!/bin/bash
+#
+# Copyright (C) 2018 UNISOC Communications Inc.
+#
+# program_name=$(echo $0 | xargs basename)
+RENAME_FORMATTER_STEPN=$(dirname `readlink -f $0`)/rename-formatter.stepN.sh
+program_name="rename-formatter"
+SPACE_TOKEN='~'
+do_help_only=
+function usage() {
+    if [ "${do_replace_action_help}" ]; then
+        echo "${do_replace_action_help}" <&2
+    else
+echo -e "
+${program_name} -i src_token1:dst_token1 src_token2:dst_token2 ... <file1> <file2> <dir1> <dir2>
+
+    -i replace right now
+
+    Example :
+    step1: \033[32m${program_name} sharkl5:sharkl5pro SHARKL5:SHARKL5PRO\033[0m
+    step2: \033[32m${program_name} -i sharkl5:sharkl5pro SHARKL5:SHARKL5PRO\033[0m
+"
+    fi
+    do_help_only=1
+}
+
+ALL=
+COUNTS=$#
+ALL_ARGS=()
+while ((COUNTS > 0)); do
+    ((COUNTS--))
+    t="$1"
+    [ "$(echo ${t} | grep ':')" ] && t=`echo "${t}" | sed "s/ /${SPACE_TOKEN}/g"` # 将空格替换为~做后续处理 2019/09/10 13:47:15 luther
+    shift
+    ALL_ARGS=(${ALL_ARGS[@]} "${t}")
+done
+
+do_final_replace_action=
+for op in ${ALL_ARGS[@]}; do
+    if [ "${op:0:1}" = "-" ]; then
+        if [ "${op}" = "-i" ]; then
+            do_final_replace_action=1
+        else
+            usage
+            break
+        fi
+    else
+        ts=($(echo "${op}" | sed 's/:/ /g'))
+        # [ "$(echo ${op} | grep ':')" ] || { usage; }
+        ((${#ts[@]} > 2)) && { usage; }
+        ALL="${ALL} ${op}"
+    fi
+done
+
+[ "${ALL}" ] || usage
+
+[ "${do_help_only}" ] || {
+    if [ ${do_final_replace_action} ]; then
+        ${RENAME_FORMATTER_STEPN} -S -D ${ALL}
+        ${RENAME_FORMATTER_STEPN} ${ALL}
+        ${RENAME_FORMATTER_STEPN} -S -D -i ${ALL}
+    else
+        ${RENAME_FORMATTER_STEPN} ${ALL}
+    fi
+}

@@ -1,0 +1,464 @@
+#!/bin/bash
+if [ "${SKIP_PROCESS}" ]; then # {
+function get_pwd_abs() {
+     lcurdir=$(readlink -f .)
+     while [ "${lcurdir}" != '/' ]; do
+         if [ -e ${lcurdir}/build/envsetup.sh ]; then
+             echo "${lcurdir}"
+             break;
+         fi
+         lcurdir=$(readlink -f ${lcurdir}/..)
+     done
+}
+
+ANDROID_TOP=`get_pwd_abs`
+
+soc_path=device/sprd/$soc
+source_board_path=$soc_path/$source_str
+target_board_path=$soc_path/$target_str
+#wcn_mpool_path=device/sprd/mpool/module/wcn/msoc/$soc
+kernel_path=bsp/kernel/kernel$kernel_version
+chipram_path=bsp/bootloader/chipram
+uboot_path=bsp/bootloader/u-boot15
+wcn_path=vendor/sprd/modules/wcn/connconfig
+bsp_device=bsp/device/$soc/${platform_code}
+if [[ $soc == sharkle ]];then
+bsp_modules=bsp/modules/gpu
+fi
+
+board_version_source_md5="`echo ${source_str} | md5sum | cut -b1-8`"
+board_version_target_md5="`echo ${target_str} | md5sum | cut -b1-8`"
+board_version_source="`echo ${source_str} | sed "s/${processor}_//;s/${processor}//;s/s9863a//;"`" # 1h10
+board_version_target="`echo ${target_str} | sed "s/${processor}_//;s/${processor}//;s/s9863a//;"`" # 8h10
+[ "${board_version_source}" = "${source_str}" ] && board_version_source=${board_version_source_md5}
+[ "${board_version_target}" = "${target_str}" ] && board_version_target=${board_version_target_md5}
+BOARD_VERSION_SOURCE="`echo ${board_version_source} | tr "[a-z]" "[A-Z]`"
+BOARD_VERSION_TARGET="`echo ${board_version_target} | tr "[a-z]" "[A-Z]`"
+
+cd $ANDROID_TOP
+sou_32b=${source_str/s9863a/sp9863a_}
+tar_32b=${target_str/s9863a/sp9863a_}
+list_name="$source_str:$target_str \
+           $SOURCE_STR:$TARGET_STR \
+           $sou_32b:$tar_32b \
+           ${source_str/_/-}:${target_str/_/-} \
+           ${SOURCE_STR/_/-}:${TARGET_STR/_/-} \
+           ${sou_32b/_/-}:${tar_32b/_/-} \
+           ${source_str/s9863a/sp9863a-}:${target_str/s9863a/sp9863a-} \
+           ${SOURCE_STR/S9863A/SP9863A-}:${TARGET_STR/S9863A/SP9863A-} \
+           ${source_str/s9863a/sp9863a_}:${target_str/s9863a/sp9863a_} \
+           ${SOURCE_STR/S9863A/SP9863A_}:${TARGET_STR/S9863A/SP9863A_} \
+           ${source_str/s9863a/sc9863a-}:${target_str/s9863a/sc9863a-} \
+           ${SOURCE_STR/S9863A/SC9863A-}:${TARGET_STR/S9863A/SC9863A-} \
+           ${SOURCE_STR/S9863A/SC9863A_}:${TARGET_STR/S9863A/SC9863A_} \
+           ${source_str/s9863a/sc9863a_}:${target_str/s9863a/sc9863a_} \
+           ${sou_32b/go_32b/32b_}:${tar_32b/go_32b/32b}"
+
+ if [[ $soc == sharkle ]];then
+ list_name="$source_str:$target_str \
+           ${source_str/go/32b}:${target_str/go/32b}"
+ fi
+
+else # } if [ "${SKIP_PROCESS}" ]; then {
+echo "============================================="
+pwd
+echo "source_board_path:${source_board_path}"
+echo "target_board_path:${target_board_path}"
+echo "kernel_path:${kernel_path}"
+echo -e "=============================================\n"
+
+if [ ! -e ${source_board_path} ]; then
+    echo "error: ${source_board_path} no exsit..."
+    exit 1
+fi
+
+# Step 1: reset&clean relative repos first
+echo "Step 1: reset&clean relative repos"
+echo "**********************************"
+echo "***relative board repo***"
+echo "device board:$soc_path"
+echo "chipram board:$chipram_path"
+echo "uboot board:$uboot_path"
+echo "kernel board:$kernel_path"
+echo "wcn board:$wcn_path"
+echo "***relative board repo***"
+echo "**********************************"
+
+function e0() {
+# Sync local changes with remote branch
+# step 1. stash save local changes
+# setp 2. get current git branch info
+# setp 3. git reset REMOTE-BRANCH --hard to drop local changes
+echo -e "======= \033[1;31m$(pwd)\033[0m ======"
+git stash save 2 >/dev/null
+BRANCH="$(repo info . 2>/dev/null | sed -n '/Current revision/{s/.*: *//g;p}')"
+[ "${BRANCH}" ] || {
+    BRANCH=$(git config branch.`git branch | sed -n '/^\*/p' | cut -d ' ' -f2`.merge | sed 's/\//\n/g' | tail -n1)
+}
+REMOTE="$(git remote | head -1)/${BRANCH}"
+echo "$REMOTE"
+if [ "$(git log -1 ${REMOTE} 2>/dev/null)" ]; then
+    git reset "${REMOTE}" --hard
+else
+    # repo init -m manifest.xml
+    # BRANCH is pointed to sha1 hash value
+    echo "sha1 hash because of repo init -m xxxx.xml"
+    git reset "${BRANCH}" --hard
+fi
+git stash list | xargs -I stashinfo echo -e '\033[1;32mstashinfo\033[0m'
+git clean -xdf
+}
+
+# test if git available first
+if which git >/dev/null; then
+  # confirm first before reset&clean
+  echo -e "\nrelative board repos will be reset&clean, save your repo modifications first if needed!!!"
+  read -p "continue to reset relative board repos (y/n)" choice
+  if [[ $choice = 'y' ]] || [[ $choice = 'Y' ]]; then
+    (cd $soc_path && e0)
+    (cd $chipram_path && e0)
+    (cd $uboot_path && e0)
+    (cd $kernel_path && e0)
+    (cd $bsp_device && e0)
+    (cd $wcn_path && e0)
+    (cd $bsp_modeles && e0)
+    echo -e "Step 1: done\n"
+  else
+    exit 1
+  fi
+else
+  echo "git is not available, skip Step 1!"
+fi
+
+
+[ "${DO_RESET}" ] && exit 0
+
+
+# Step 2: create device board
+# 路径：device/sprd/sharkl3
+echo "Step 2: create device board"
+echo "***************************"
+echo "device source_board_path:$source_board_path"
+echo "device target_board_path:$target_board_path"
+echo "***************************"
+
+# 拷贝原先文件夹重命名
+rm -rf $target_board_path
+cp -fr $source_board_path $target_board_path
+
+# copy&rename
+echo "clone $source_board_path -> $target_board_path"
+echo "rename $source_str -> $target_str"
+cd $target_board_path
+
+# 将新建的文件夹内部含有原先board名称的字符串全部改为新board名称
+rename-formatter -i $list_name
+if  [[ $source_str == *32b* ]];then
+   source_str_s9863a_=${source_str/s9863a/sp9863a_}
+   source_32b=${source_str_s9863a_/_go/}
+   target_str_s9863a_=${target_str/s9863a/sp9863a_}
+   target_32b=${target_str_s9863a_/_go/}
+   sed -i "s/$source_32b/$target_32b/g" ${target_str}_2g.mk
+   sed -i "s/$source_32b/$target_32b/g" ${target_str}_Natv.mk
+   sed -i "s/${source_str/_go_32b/}/${target_str/_go_32b/}/g" ${target_str}.xml
+elif [[ $soc == sharkle ]];then
+   source_str_sp9832e=${source_str/_go/}
+   target_str_sp9832e=${target_str/_go/}
+   source_str_sp9832=${source_str_sp9832e/_/-}
+   target_str_sp9832=${target_str_sp9832e/_/-}
+   sed -i "s/$source_str_sp9832e/$target_str_sp9832e/g" ${target_str}2g.mk
+   sed -i "s/$source_str_sp9832e/$target_str_sp9832e/g" ${target_str}fu.mk
+   sed -i "s/$source_str_sp9832/$target_str_sp9832/g" ${target_str}2g.mk
+   sed -i "s/$source_str_sp9832/$target_str_sp9832/g" ${target_str}fu.mk
+   sed -i "s/$source_str_sp9832e/$target_str_sp9832e/g" ${target_str}.xml
+fi
+cd ->/dev/null
+# add AndroidProducts.mk config
+for product_name in `grep PRODUCT_NAME -nr ${source_board_path} | awk -F ":= " '{print $2}'`; do
+    echo $product_name
+    sed -i "s/\(.*\)${product_name}:\$(LOCAL_DIR)\/${source_str}\/${product_name}\.mk\(.*\)/\1${product_name}:\$(LOCAL_DIR)\/${source_str}\/${product_name}\.mk\2\n\1${product_name/$source_str/$target_str}:\$(LOCAL_DIR)\/${target_str}\/${product_name/$source_str/$target_str}\.mk\2/g" ${soc_path}/AndroidProducts.mk
+    sed -i "s/\(.*\)${product_name}-\(.*\)/\1${product_name}-\2\n\1${product_name/$source_str/$target_str}-\2/g" ${soc_path}/AndroidProducts.mk
+    config=`grep ${product_name}: ${soc_path}/AndroidProducts.mk | head -1`
+    if ! [[ $config = *"\\"* ]]; then
+    sed -i "s/${product_name}:\$(LOCAL_DIR)\/${source_str}\/${product_name}\.mk\(.*\)/${product_name}:\$(LOCAL_DIR)\/${source_str}\/${product_name}\.mk\1 \\\/g" ${soc_path}/AndroidProducts.mk
+    fi
+    config=`grep ${product_name}- ${soc_path}/AndroidProducts.mk | head -1`
+    if ! [[ $config = *"\\"* ]]; then
+    sed -i "s/${product_name}-\(.*\)/${product_name}-\1 \\\/g" ${soc_path}/AndroidProducts.mk
+    fi
+done
+echo -e "Step 2: done\n"
+
+# Step 3: create bsp/device board
+echo "Step 3: create bsp/device board"
+echo "***************************"
+echo "source_bsp_board_path=bsp/device/$soc/${platform_code}/$source_str"
+echo "target_bsp_board_path=bsp/device/$soc/${platform_code}/$target_str"
+echo "***************************"
+source_bsp_board_path=bsp/device/$soc/${platform_code}/$source_str
+target_bsp_board_path=bsp/device/$soc/${platform_code}/$target_str
+kernel_source=$source_str
+kernel_target=$target_str
+
+if [[ $soc == pike2 ]] || [[ $soc == sharkle ]] || [[ `echo $source_str | grep "32b"` ]];then
+target_kernel_arch=arm
+else
+target_kernel_arch=arm64
+fi
+
+# N03.1 copy&rename
+echo "N03.1 copy&rename"
+echo "clone $source_bsp_board_path -> $target_bsp_board_path"
+echo "rename $kernel_source -> $kernel_target"
+rm -rf $target_bsp_board_path
+
+cp -fr $source_bsp_board_path  $target_bsp_board_path
+cd $target_bsp_board_path
+rename-formatter -i $list_name
+
+if [[ $soc == sharkle ]];then
+source_str_sp9832e_=${source_str/_go/}
+source_sp9832e=${source_str_sp9832e_/sp9832e_/sp9832e-}
+target_str_sp9832e_=${target_str/_go/}
+target_sp9832e=${target_str_sp9832e_/sp9832e_/sp9832e-}
+sed -i "s/$source_str_sp9832e_/$target_str_sp9832e_/g" ${target_str}_base/chipram.cfg
+sed -i "s/$source_str_sp9832e_/$target_str_sp9832e_/g" ${target_str}_base//uboot.cfg
+sed -i "s/$source_sp9832e/$target_sp9832e/g" ${target_str}2g/common.cfg
+sed -i "s/$source_sp9832e/$target_sp9832e/g" ${target_str}fu_nsec/common.cfg
+sed -i "s/$source_sp9832e/$target_sp9832e/g" ${target_str}fu/common.cfg
+fi
+
+cd ->/dev/null
+
+echo "No3.2 deal with diff config       /${platform_code}"
+source_kernel_diff_config_path=$kernel_path/sprd-diffconfig/${platform_code}/$soc/$target_kernel_arch/${kernel_source}_diff_config
+target_kernel_diff_config_path=$kernel_path/sprd-diffconfig/${platform_code}/$soc/$target_kernel_arch/${kernel_target}_diff_config
+echo "source_kernel_diff_config_path=$kernel_path/sprd-diffconfig/${platform_code}/$soc/$target_kernel_arch/${kernel_source}_diff_config"
+echo "target_kernel_diff_config_path=$kernel_path/sprd-diffconfig/${platform_code}/$soc/$target_kernel_arch/${kernel_target}_diff_config"
+if [ -e $source_kernel_diff_config_path ]; then
+    rm -rf $target_kernel_diff_config_path
+    cp -fr $source_kernel_diff_config_path $target_kernel_diff_config_path
+    echo "clone $source_kernel_diff_config_path -> $target_kernel_diff_config_path"
+fi
+# No3.3 deal with dts & dtbo file
+echo "# No3.3 deal with dtbs file"
+source_dtb_str=`grep -nir "BSP_DTB.*=.*" $source_bsp_board_path | head -1 | sed 's/.*= *//' | sed 's/"//g'`
+source_dtbo_str=`grep -nir "BSP_DTBO.*=.*" $source_bsp_board_path | head -1 | sed 's/.*= *//' | sed 's/"//g'`
+target_dtb_str=`grep -nir "BSP_DTB.*=.*" $target_bsp_board_path | head -1 | sed 's/.*= *//' | sed 's/"//g'`
+target_dtbo_str=`grep -nir "BSP_DTBO.*=.*" $target_bsp_board_path | head -1 | sed 's/.*= *//' | sed 's/"//g'`
+a=`grep -nir "BSP_DTB.*=.*" $target_bsp_board_path | head -1 `
+echo "============================================="
+echo $source_dtb_str $source_dtbo_str $target_dtb_str $target_dtbo_str
+echo "============================================="
+if [ $target_kernel_arch = "arm64" ]; then
+    dts_path=arch/arm64/boot/dts/sprd
+else
+    dts_path=arch/arm/boot/dts
+fi
+source_dtb_path=${kernel_path}/${dts_path}/${source_dtb_str}.dts
+target_dtb_path=${kernel_path}/${dts_path}/${target_dtb_str}.dts
+source_dtbo_path=${kernel_path}/${dts_path}/${source_dtbo_str}.dts
+target_dtbo_path=${kernel_path}/${dts_path}/${target_dtbo_str}.dts
+if [[ $soc == roc1 ]];then
+source_mach_path=${kernel_path}/${dts_path}/${source_dtb_str}-mach.dtsi
+target_mach_path=${kernel_path}/${dts_path}/${target_dtb_str}-mach.dtsi
+source_modem_path=${kernel_path}/${dts_path}/${source_dtb_str}-modem.dtsi
+target_modem_path=${kernel_path}/${dts_path}/${target_dtb_str}-modem.dtsi
+fi
+echo "clone $source_dtb_path -> $target_dtb_path"
+echo "clone $source_dtbo_path -> $target_dtbo_path"
+echo "rename $source_str -> $target_str"
+echo $target_dtb_path
+echo $target_dtbo_path
+rm -rf $target_dtb_path $target_dtbo_path
+cp -fr $source_dtb_path $target_dtb_path
+cp -fr $source_dtbo_path $target_dtbo_path
+if [[ $soc == roc1 ]];then
+rm -rf $target_mach_path $target_modem_path
+cp -fr $source_mach_path $target_mach_path
+cp -fr $source_modem_path $target_modem_path
+fi
+rename-formatter -i $list_name  $target_dtb_path $target_dtbo_path
+if [[ $soc == sharkle ]];then
+SOURCE_STR_SP9832E_=${SOURCE_STR/_GO/}
+SOURCE_SP9832E=${SOURCE_STR_SP9832E_/SP9832E_/SP9832E-}
+TARGET_STR_SP9832E_=${TARGET_STR/_GO/}
+TARGET_SP9832E=${TARGET_STR_SP9832E_/SP9832E_/SP9832E-}
+sed -i "s/$source_str_sp9832/$target_str_sp9832/g" $target_dtb_path
+sed -i "s/$SOURCE_SP9832E/$TARGET_SP9832E/g" $target_dtb_path
+fi
+# No3.4 add config in ${kernel_path}/${dts_path}/Makefile
+echo "No3.4 add config in ${kernel_path}/${dts_path}/Makefile"
+makefile_path=${kernel_path}/${dts_path}/Makefile
+sed -i "s/\(.*\)${source_dtb_str}.dtb\(.*\)/\1${source_dtb_str}.dtb\2\n\1${target_dtb_str}.dtb\2/" $makefile_path
+sed -i "s/\(.*\)${source_dtbo_str}.dtbo\(.*\)/\1${source_dtbo_str}.dtbo\2\n\1${target_dtbo_str}.dtbo\2/" $makefile_path
+# deal with last one which is not end with '\'
+config=`grep ${source_dtb_str} $makefile_path | head -1`
+if ! [[ $config = *"\\"* ]]; then
+  sed -i "s/${source_dtb_str}.dtb\(.*\)/${source_dtb_str}.dtb\1 \\\/g" $makefile_path
+fi
+config=`grep ${source_dtbo_str} $makefile_path | head -1`
+if ! [[ $config = *"\\"* ]]; then
+  sed -i "s/${source_dtbo_str}.dtbo\(.*\)/${source_dtbo_str}.dtbo\1 \\\/g" $makefile_path
+fi
+echo -e "Step 3: done\n"
+
+# Step 4: create uboot board
+echo "Step 4: create uboot board"
+
+if [[ $source_str == *9863* ]] && [[ $source_str != *_* ]];then
+echo 'This is sharkl3' $source_str
+uboot_source=${source_str/s9863a/sp9863a_}
+elif [[ $source_str == *32b* ]];then
+uboot_source_32b=${source_str/s9863a/sp9863a_}
+uboot_source=${uboot_source_32b/go_32b/32b}
+elif [[ $soc == sharkle ]];then
+uboot_source=${source_str/go/32b}
+else
+uboot_source=$source_str
+fi
+if [[ $target_str == *9863* ]] && [[ $target_str != *_* ]];then
+echo 'This is sharkl3' $target_str
+uboot_target=${target_str/s9863a/sp9863a_}
+echo "This is sharkl3"
+elif [[ $target_str == *32b* ]];then
+uboot_target_32b=${target_str/s9863a/sp9863a_}
+uboot_target=${uboot_target_32b/go_32b/32b}
+elif [[ $soc == sharkle ]];then
+uboot_target=${target_str/go/32b}
+else
+uboot_target=$target_str
+echo "This is sharkl3_go_32b"
+fi
+
+# No4.1 copy&rename
+echo "**************************"
+echo "No4.1 copy&rename $uboot_source -> $uboot_target"
+echo "clone ${uboot_path}/arch/arm/dts/${uboot_source}.dts -> ${uboot_path}/arch/arm/dts/${uboot_target}.dts"
+echo "clone ${uboot_path}/board/spreadtrum/${uboot_source} -> ${uboot_path}/board/spreadtrum/${uboot_target}"
+echo "clone ${uboot_path}/configs/${uboot_source}_defconfig -> ${uboot_path}/configs/${uboot_target}_defconfig"
+echo "clone ${uboot_path}/include/configs/${uboot_source}.h -> ${uboot_path}/include/configs/${uboot_target}.h"
+echo -e "**************************\n"
+rm -rf ${uboot_path}/arch/arm/dts/${uboot_target}.dts \
+       ${uboot_path}/board/spreadtrum/${uboot_target} \
+       ${uboot_path}/configs/${uboot_target}_defconfig \
+       ${uboot_path}/include/configs/${uboot_target}.h
+cp -fr ${uboot_path}/arch/arm/dts/${uboot_source}.dts ${uboot_path}/arch/arm/dts/${uboot_target}.dts
+cp -fr ${uboot_path}/board/spreadtrum/${uboot_source} ${uboot_path}/board/spreadtrum/${uboot_target}
+cp -fr ${uboot_path}/configs/${uboot_source}_defconfig ${uboot_path}/configs/${uboot_target}_defconfig
+cp -fr ${uboot_path}/include/configs/${uboot_source}.h ${uboot_path}/include/configs/${uboot_target}.h
+rename-formatter -i $list_name ${uboot_path}/arch/arm/dts/${uboot_target}.dts \
+                               ${uboot_path}/configs/${uboot_target}_defconfig \
+                               ${uboot_path}/include/configs/${uboot_target}.h
+
+# Only for sharkl3
+if [[ $target_str == *9863* ]] && [[ $target_str != *_* ]];then
+sed -i "s/${source_str/s9863a/ 9863a_}/${target_str/s9863a/ 9863a_}/g" ${uboot_path}/arch/arm/dts/${uboot_target}.dts
+elif [[ $target_str == *32b* ]];then
+source_str_go_32b=${source_str/s9863a/9863a_}
+source_str_32b=${source_str_go_32b/_go/}
+target_str_go_32b=${target_str/s9863a/9863a_}
+target_str_32b=${target_str_go_32b/_go/}
+sed -i "s/$source_str_32b/$target_str_32b/g" ${uboot_path}/arch/arm/dts/${uboot_target}.dts
+fi
+if [[ $soc == sharkle ]];then
+source_str_9832e_go=${source_str/sp/}
+source_str_9832e=${source_str_9832e_go/_go/}
+target_str_9832e_go=${target_str/sp/}
+target_str_9832e=${target_str_9832e_go/_go/}
+sed -i "s/$source_str_9832e/$target_str_9832e/g" ${uboot_path}/arch/arm/dts/${uboot_target}.dts
+fi
+
+cd ${uboot_path}/board/spreadtrum/${uboot_target}
+rename-formatter -i $list_name
+cd ->/dev/null
+
+# No4.2 add config in u-boot15/arch/arm/dts/Makefile
+echo "No4.2 add config in ${uboot_path}/arch/arm/dts/Makefile"
+uboot_makefile=${uboot_path}/arch/arm/dts/Makefile
+sed -i "s/\(.*\)${uboot_source}.dtb\(.*\)/\1${uboot_source}.dtb\2\n\1${uboot_target}.dtb\2/" $uboot_makefile
+
+config=`grep ${uboot_source} $uboot_makefile | head -1`
+if ! [[ $config = *"\\"* ]]; then
+  sed -i "s/${uboot_source}.dtb\(.*\)/${uboot_source}.dtb\1 \\\/g" $uboot_makefile
+fi
+# No4.3 add config in u-boot15/board/spreadtrum/Kconfig
+echo "No4.3 add config in ${uboot_path}/board/spreadtrum/Kconfig"
+uboot_kconfig=${uboot_path}/board/spreadtrum/Kconfig
+line=`grep -n "\bTARGET_${uboot_source^^}\b" ${uboot_kconfig} | sed 's/:.*//'`
+sed -n $line,+5p ${uboot_kconfig} | sed "s/${uboot_source^^}/${uboot_target^^}/" > temp.txt
+sed -i "$(expr $line + 5)r temp.txt" ${uboot_kconfig}
+rm temp.txt 2>/dev/null
+sed -i "s/\(.*\)${uboot_source}\(.Kconfig.*\)/\1${uboot_source}\2\n\1${uboot_target}\2/" $uboot_kconfig
+
+
+# No4.4 add ${uboot_path}/scripts/Makefile.autoconf
+echo "# No4.4 add ${uboot_path}/scripts/Makefile.autoconf"
+ma=${uboot_path}/scripts/Makefile.autoconf
+echo $uboot_source
+echo $uboot_target
+#sed  -i "s/\(.*\)AUTO_ADAPTIVE_BOARD_LIST\(.*\)\"${uboot_source}\"/\1AUTO_ADAPTIVE_BOARD_LIST\2\"${uboot_source}\" \"${uboot_target}\"/" $ma
+sed  -i "s/\"${uboot_source}\"/\"${uboot_source}\" \"${uboot_target}\"/" $ma
+
+echo -e "Step 4: done\n"
+
+# Step 5: create chipram board
+echo "Step 5: create chipram board"
+if [[ $source_str == *9863* ]] && [[ $source_str != *_* ]];then
+echo 'This is sharkl3' $source_str
+chipram_source=${source_str/s9863a/sp9863a_}
+chipram_target=${target_str/s9863a/sp9863a_}
+elif [[ $source_str == *32b* ]];then
+chipram_source_32b=${source_str/s9863a/sp9863a_}
+chipram_source=${chipram_source_32b/go_32b/32b}
+chipram_target_32b=${target_str/s9863a/sp9863a_}
+chipram_target=${chipram_target_32b/go_32b/32b}
+elif [[ $soc == sharkle ]];then
+chipram_source=${source_str/go/32b}
+chipram_target=${target_str/go/32b}
+else
+chipram_source=$source_str
+chipram_target=$target_str
+fi
+echo "****************************"
+echo "chipram_source=$chipram_source"
+echo "chipram_target=$chipram_target"
+echo "****************************"
+
+# No5.1 copy&rename
+echo "No5.1 copy&rename $chipram_source -> $chipram_target"
+echo "clone bsp/bootloader/chipram/include/configs/${chipram_source}.h -> bsp/bootloader/chipram/include/configs/${chipram_target}.h"
+rm -rf bsp/bootloader/chipram/include/configs/${chipram_target}.h
+cp -fr bsp/bootloader/chipram/include/configs/${chipram_source}.h bsp/bootloader/chipram/include/configs/${chipram_target}.h
+
+# No5.2 add config in bsp/bootloader/chipram/board.def
+echo "No5.2 add config in bsp/bootloader/chipram/board.def"
+chipram_board_def=bsp/bootloader/chipram/board.def
+line=`grep -n "\b${chipram_source}_config\b" ${chipram_board_def} | sed 's/:.*//'`
+sed -n $line,+2p ${chipram_board_def} | sed "s/${chipram_source}/${chipram_target}/" > temp.txt
+sed -i "$(expr $line + 2)r temp.txt" ${chipram_board_def}
+rm temp.txt 2>/dev/null
+echo -e "Step 5: done\n"
+
+# Step 6: create wcn board
+echo "Step 6: create wcn board"
+wcn_combo=`grep -nir "BOARD_HAVE_SPRD_WCN_COMBO.*=.*" ${target_board_path} | sed 's/.*= *//'| awk '!visited[$0]++'`
+echo "$wcn_combo"
+if [ ! -n "$wcn_combo" ]; then
+wcn_combo=$soc
+echo "$wcn_combo"
+else
+echo "-$wcn_combo-"
+fi
+wcn_connconfig=vendor/sprd/modules/wcn/connconfig
+wcn_source=${wcn_connconfig}/${wcn_combo}/${source_str}
+wcn_target=${wcn_connconfig}/${wcn_combo}/${target_str}
+# copy&rename
+echo "************************"
+echo "clone $wcn_source -> $wcn_target"
+echo "rename $source_str -> $target_str"
+echo "************************"
+rm -rf ${wcn_target}
+cp -fr ${wcn_source} ${wcn_target}
+echo -e "Step 6: done\n"
+fi # } if [ "${SKIP_PROCESS}" ]; then

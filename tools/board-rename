@@ -1,0 +1,61 @@
+#!/bin/bash
+#
+# Copyright (C) 2020 UNISOC Communications Inc.
+#
+rename_list=
+change_list=
+function changeName(){
+    new=$1
+    for name in $rename_list;do
+    	new=`echo $new | sed 's/'${name%%:*}'/'${name#*:}'/g'`
+    done
+    if [ $1 != $new ];then
+    	#echo $1 '->' $new
+    	mv $1 $new
+    fi
+}
+
+function travFolder(){
+    flist=`ls $1`
+    cd $1
+    for f in $flist
+    do
+      local old=$f
+      if test -d $f;then
+        travFolder $f
+        #echo 'folder: ' $old
+        changeName $old
+      else
+      	#echo 'file: '$f
+        for name in $rename_list;do
+          sed -i 's/'${name%%:*}'/'${name#*:}'/g' $f
+        done
+        changeName $f
+      fi
+    done
+    cd ../
+}
+
+function travFile(){
+  for file in $change_list;do
+    for name in $rename_list;do
+      sed -i 's/'${name%%:*}'/'${name#*:}'/g' $file
+    done
+  done
+
+}
+
+args=$@
+path="./"
+
+if [[ $@ == *" -f "* ]];then
+	rename_list=${args%% -f *}
+	change_list=${args#* -f }
+  travFile
+elif [[ $@ == '-h' || $@ == '-help' || $@ == '--help' ]]; then
+  echo "Replace all files in the current directory ===> board-rename 1h10:2h10 ... sharkl3:sharkl5"
+  echo "Replace specified file ===> board-rename 1h10:2h10 ... sharkl3:sharkl5 -f s9863a1h10.dts ums512_1h10.dts"
+else
+	rename_list=$args
+  travFolder $path
+fi
